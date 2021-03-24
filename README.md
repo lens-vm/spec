@@ -2,11 +2,12 @@
 title: LensVM Specification
 tags: lens-vm, specification, draft
 ---
+
 <p align="center">
 <img src="https://i.imgur.com/u29eC7t.png">
 </p>
 
-#
+# LensVM
 ![](https://img.shields.io/badge/Owner-@jsimnz-blue) ![](https://img.shields.io/badge/Status-DRAFT-yellow)
 
 LensVM is a data migration/transformation engine powered by bi-directional lenses. This work is based on the [Cambria]() project by Ink&Switch. LensVM uses bi-directional lenses, written in WebAssembly for portability to transform data from one shape to another. This project houses a collection of specifications and implementations to realize the full goal of LensVM. This project relies on [Content Identified]() data models, [JSON-Schema](), and (maybe) [Ceramic Network]() for data consistency and schema registration.
@@ -112,8 +113,8 @@ Example Lens File
 {
     "import": {
         "*": "Qm987",
-        "hoist", "Qm654"
-    }
+        "hoist": "Qm654"
+    },
     "lenses": [
         {
             "rename": {
