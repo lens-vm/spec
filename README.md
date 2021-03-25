@@ -60,7 +60,7 @@ and we wanted to convert to a single `name` field, using the JSON-Patch approach
        "source": [
            "firstName",
            "lastName"
-       ]
+       ],
        "destination": "name"
     }
 }
@@ -77,15 +77,17 @@ Lenses are accompanied by their matchin meta-data which defines their functional
 
 LensVM uses language specific SDKs to create lens functions to ensure consistency and utility between languages, and host VM's. This SDK will provide hooks to import lenses from other langauges via the Lens Module and compiled WASM code. It will provide consistent utility functions to manage incoming data and parameters, and translate that to a Lens File.
 
-## Lens Module
+## Module File (module.json/yaml)
 A Lens Module is a combination of the compiled lens in WASM, and its associated meta-data into a single CID based object. A lens definition only exports a single transformation (like `rename`), however that exported function can itself depend on other pre-existing lenses, identified by the CIDs of their respective Lens Module files. These definitions can then be importent individually or as a group defined as a Lens Package.
 
-Before formally defining a `Lens Module` here's a rough example
+Here's an example `Module File`
 
 ```json
 {
     "name": "rename",
     "description": "Rename a field from source to destination",
+    "url": "https://github.com/lens-vm/community-modules"
+    
     "arguments": {
         "type": "object",
         "properties": {
@@ -99,13 +101,17 @@ Before formally defining a `Lens Module` here's a rough example
             }
         }
     },
+    "import": {
+        "extract": "Qm999"
+    }
     
     "runtime": "wasm",
-    "module": "Qm123" // CID Link or raw bytes?
+    "language": "go",
+    "module": "Qm123"
 }   
 ```
 
-## Lens File
+## Lens File (lens.json/yaml)
 A Lens File is the main entry point into the LensVM ecosystem. It defines all the lenses and their arguments to actually transform a document from one form to another. 
 
 Example Lens File
@@ -151,7 +157,9 @@ Example Lens File
 Lens files can be written in either `JSON` or `YAML`. Here we have `JSON` example with the two main fields `import` and `lenses`. 
 
 ### Importing Lenses
-The `import` field defines all the lens modules we use in our Lens File. We can selectively import a named lens module defined in a Lens Definition, or import all the modules using the `*` label.
+The `import` field defines all the lens modules we use in our Lens File. We can selectively import a named lens module defined in a Lens Definition, or import all the modules using the `"*"` label. Explicitly importing a named module always takes priorty over the same named module imported implicitly through a `"*"` label. Therefore, in the above example, the `hoist` module with ID `Qm654` would take precedent over an equivalently named `hoist` module implicity imported from the `"*"` label from the module `Qm987`.
+
+If there are two implicity imported modules with the same name using a `"*"` label, priority is given to whichever has a the first lexigraphical ordering (E.g. `Qm111` < `Qm222`).
 
 ### Lens Parameters
 The `lenses` field defines which lenses, the order, and the parameters to execute. These parameters must match the `arguments` field defined in the `Lens Module`, which is defined as a `JSON-Schema` to enable easy and consistent validation.
@@ -168,3 +176,68 @@ The `Lens Graph` would be a [Directed Acyclic Graph]() as each edge has an impli
 In general, if a system uses LensVM, and is able to coorelate one lens to another through some kind of relation then LensVM can execute the entire traversal of related lenses as a single operation.
 
 The LensVM project maintains a seperate toolkit called [lens-graph]() which is a utility to help developers construct and use Lens Graph's as defined above. 
+
+## Application Binary Interface (ABI)
+The ABI is a interface specification that ensures that compiled LensVM WASM modules seemlessly work with one another. It requires no changes to the existing WASM interface or specification, instead it states what functions are required to be exported via a WASM module.
+
+At its core, LensVM modules are document transformation functions, which take in arguments defined in a `Lens File` and return a mutated document.
+
+The LensVM ABI is split into `Module` functions and `Host` functions. `Module` functions are those that need to be implemented on the module side. `Host` functions need to be implemented on the host side.
+
+## ABI - WASM Module Functions
+A compiled LensVM WASM module must export the following functions
+
+### `lensvm_module()`
+- params:
+    - none
+- returns:
+    - none
+
+Indicates this a LensVM Module
+
+### `lensvm_abi_version_X_Y_Z()`
+- params:
+    - none
+- returns:
+    - none
+
+Exports ABI version.
+
+`X, Y, Z` match `<major>, <minor>, and <patch>` cooresponds to the LensVM SemVer Version this module was compiled against (vX.Y.Z).
+
+### `lensvm_exec`
+- params: 
+    - `context_id`: a unique identifier generated for each module execution
+    - `lens_name`: the name of the lens module to execute
+    - `arg_obj`: a CBOR serialized object containing the arguments passed in the `Lens File`.
+    - `data_obj`: a CBOR serialized object containing the data to transform
+- returns
+    - `res_obj` is the return value, which is a CBOR serialized object with the results of the lens transformation
+
+Executes a named lens transformation, functionally equivalent to `lensvm_exec_<lens_name>`
+
+### `lensvm_exec_<lens_name>`
+- params: 
+    - `context_id`: a unique identifier generated for each module execution
+    - `arg_obj`: a CBOR serialized object containing the arguments passed in the `Lens File`.
+    - `data_obj`: a CBOR serialized object containing the data to transform
+- returns
+    - `res_obj` is the return value, which is a CBOR serialized object with the results of the lens transformation
+
+Executes a lens transformation where <lens_name> is the name of the lens, functionally equivalent to `lensvm_exec`. 
+
+>[color=green] The reason for having an explicitly named lens export, and a general `exec` export is for module dependancies. If you define a module that depends on another module, we need to have a direct export for that function, otherwise we would have a name collision trying to import and execute multiple lenses, all of which used the `lensvm_exec` export name.
+
+## ABI - Host Module Functions
+A compliant LensVM Host must export the following functions
+
+### `lensvm_get_buffer`
+- params:
+    - `buffer_type`: The type of buffer to get
+    - `offset`: The offset starting point in memory where the buffer exists
+    - `max_size`: The max size of buffer
+    - `return_buffer_data`: A pointer for the returned buffer
+    - `return_buffer_size`: A pointer for the returned buffer size
+- returns:
+    - `call_result`: The status of the call
+
