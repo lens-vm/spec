@@ -228,6 +228,22 @@ Executes a lens transformation where <lens_name> is the name of the lens, functi
 
 >[color=green] The reason for having an explicitly named lens export, and a general `exec` export is for module dependancies. If you define a module that depends on another module, we need to have a direct export for that function, otherwise we would have a name collision trying to import and execute multiple lenses, all of which used the `lensvm_exec` export name.
 
+### `lensvm_memory_return_ptr`
+- params:
+    - `return_ptr`: A return value from a function call, double pointer
+- returns
+    - `data_ptr`: A pointer to a data buffer in the WASM memory
+
+Gets the pointer to a buffer from the return double pointer.
+
+### `lensvm_memory_return_size`
+- params:
+    - `return_ptr`: A return value from a function call, double pointer
+- returns
+    - `data_size`: The size of the buffer pointer to by the return double pointer
+
+Gets the size of the buffer from the return double pointer
+
 ## ABI - Host Module Functions
 A compliant LensVM Host must export the following functions
 
@@ -241,3 +257,77 @@ A compliant LensVM Host must export the following functions
 - returns:
     - `call_result`: The status of the call
 
+Host function to get a buffer value
+
+### `lensvm_set_buffer`
+- params:
+    - `buffer_type`: The type of buffer to set
+    - `offset`: The offset to set the buffer to in existing memory
+    - `max_size`: The size of the existing buffer in memory
+    - `buffer_data`: A pointer for the new buffer to set
+    - `buffer_size`: The size of the buffer to set
+
+Host function to set a buffer value
+
+## Memory Management
+Memory is a complex issue in WebAssembly due to the isolation between host and module, and the nature of linear memory design of WebAssembly. This is compound by WASM only supporting very basic types (i32, i64, f32, and f64). Most notably WASM doesn't support complex types like arrays, objects, or even strings. 
+
+Therefore, 
+
+### Function Arguments
+To use these complex types in our lens modules, we need to break them down into the base supported types, and utilize some memory management magic.
+
+The WASM runtime supports sharing the linear memory system between the module and the host. The standard approach for supporting compound types is to serialize them into a byte slice/array, copying the buffer into the shared memory heap, and using supplying the new buffers pointer and size in function arguments
+
+![](https://i.imgur.com/WGWiYTO.png)
+###### *image credit: https://hacks.mozilla.org/2019/08/webassembly-interface-types/*
+
+We then design our function as:
+```go
+// This function signature
+someFunc(s string)
+
+// Becomes
+someFunc(sPtr *byte, size int)
+
+// Which compiles to WASM
+someFunc(i32, i32)
+```
+
+### Function Return
+
+Return types are a little more complicated then arguments. The reason is that WebAssembly only supports returning a single value, unlike the arguments, which can contain several.
+
+We can see from our approach from above, of converting our complex type into a pointer and a size argument needs to be adjusted to support a single value return system.
+
+Additionally, we also need to support some kind of error/status return value. So, we need to include the following in a single return type
+- Status or Error
+- Pointer to string in memory
+- Size of string in memory
+
+The approach we take for LensVM is two fold. The single return value is a i32 type. We reserve the values 1-10 for error codes. If the return value is between 1-10, then we know there was some kind of error. If the value is > 10, then we know the execution was succesful.
+
+For succesfull functional calls, the return value will be a double pointer (pointer to a pointer). The double pointer is an index into a map maintained by the module which points to both the pointer and size of the intended result type. We then have two helper functions `lensvm_mem_res_ptr` and `lensvm_mem_res_size`. 
+
+#### `lensvm_memory_return_ptr(ret)`
+A helper function which converts a return value double pointer to a concrete buffer pointer.
+
+#### `lensvm_memory_return_size(ret)`
+A helper function which converts a return value double pointer to a buffer size value
+
+Finally, we use the host function`GetMemory(ptr, size)` to get the actual return value byte slice.
+
+Here's an example to demonstrate how this all comes together
+```go=
+ret := module.someFuncThatReturnString()
+if ret <= 10 {
+    panic(StatusToError(ret))
+}
+
+ptr := lensvm_memory_return_ptr(ret)
+size := lensvm_memory_return_size(ret)
+
+buf := module.GetMemory(ptr, size)
+val := string(buf)
+
+```
