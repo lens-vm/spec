@@ -1,0 +1,67 @@
+{
+    "$schema": "http://json-schema.org/draft-04/schema#",
+    "$id": "https://lensvm.org/spec/v0.0.1/schemas/module.json",
+
+    "definitions": {
+        "arguments":{
+            "allOf": [
+                {"$ref": "https://json-schema.org/draft/2020-12/schema"},
+                {
+                    "properties": {
+                        "type": {
+                            "type": "string",
+                            "enum": ["object", "array"]
+                        }
+                    }
+                }
+            ]
+        },
+        "baseModule":{
+            "type": "object",
+            "properties": {
+                "name":         {"type": "string"},
+                "description":  {"type": "string"},
+                "url":          {"type": "string"},
+                "runtime":      {"type": "string"},
+                "language":     {"type": "string"},
+                "package":      {"type": "string"},
+                "arguments":    {"$ref": "#/definitions/arguments"}
+            },
+            "required": [
+                "runtime",
+                "language",
+                "package"
+            ]
+        },
+        "module":{
+            "allOf": [
+                {
+                    "$ref": "#/definitions/baseModule"
+                },
+                {
+                    "properties": {
+                        "modules": {
+                            "type":"array",
+                            "items": {
+                                "allOf":[
+                                    { "$ref": "#/definitions/baseModule" },
+                                    {
+                                        "required": ["name"]
+                                    }
+                                ]
+                            },
+                            "uniqueItems": true
+                        }
+                    },
+
+                    "oneOf":[
+                        {"required": ["name"]},
+                        {"required": ["modules"]}
+                    ]
+                }
+            ]
+        }
+    },
+
+    "$ref": "#/definitions/module"
+}
